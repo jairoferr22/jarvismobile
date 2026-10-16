@@ -3,12 +3,15 @@ import socketio
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from google import genai
 
-# Inicializa o servidor Socket.IO
+# Inicializa o cliente do Gemini (ele lê automaticamente a variável de ambiente GEMINI_API_KEY)
+# Para configurar sua chave no Render: acesse o painel do seu Web Service > Environment > Add Environment Variable (GEMINI_API_KEY)
+client = genai.Client()
+
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 app = FastAPI(title="JARVIS Core Engine")
 
-# Habilita CORS para permitir conexão da Vercel / Celular
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
@@ -23,7 +26,6 @@ async def status():
   return {'system': 'JARVIS Core', 'status': 'ONLINE', 'power': '100%'}
 
 
-# Eventos Socket.IO
 @sio.event
 async def connect(sid, environ):
   print(f'⚡ [SISTEMA] Dispositivo conectado: {sid}')
@@ -35,36 +37,34 @@ async def connect(sid, environ):
 
 
 @sio.event
-async def disconnect(sid):
-  print(f'🔻 [SISTEMA] Dispositivo desconectado: {sid}')
-
-
-@sio.event
 async def send_command(sid, data):
   comando = data.get('command', '')
-  print(f'📥 [COMANDO MÓVEL RECEBIDO]: {comando}')
+  print(f'📥 [COMANDO MÓVEL]: {comando}')
 
-  # Log de processamento para o celular
   await sio.emit(
       'system_log',
-      {'msg': f"Processando instrução: '{comando[:30]}...'"},
+      {'msg': f"Processando instrução via IA: '{comando[:30]}...'"},
       room=sid,
   )
 
-  # LÓGICA DO JARVIS (Aqui você pode conectar seus agentes, MT5, APIs, etc.)
-  # Resposta simplificada de exemplo:
-  resposta = (
-      f"Comando '{comando}' recebido e processado com sucesso pelo Jarvis Core."
-  )
+  try:
+    # Chamada real usando o Gemini SDK
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=(
+            'Você é o JARVIS, assistente pessoal avançado do Jairo. Seja'
+            f' direto, técnico e prestativo. Instrução: {comando}'
+        ),
+    )
+    resposta_jarvis = response.text
+  except Exception as e:
+    resposta_jarvis = f'Erro ao processar com o Gemini: {str(e)}'
 
-  # Envia a resposta final para a interface web
-  await sio.emit('jarvis_response', {'response': resposta}, room=sid)
+  await sio.emit('jarvis_response', {'response': resposta_jarvis}, room=sid)
 
 
-# Junta o Socket.IO com o FastAPI
 app_asgi = socketio.ASGIApp(sio, app)
 
 if __name__ == '__main__':
   port = int(os.environ.get('PORT', 8000))
-  print(f'🚀 JARVIS Core rodando na porta {port}...')
   uvicorn.run(app_asgi, host='0.0.0.0', port=port)
